@@ -132,6 +132,10 @@ fn identifier_for_token(token: &SyntaxToken<MLanguage>) -> Option<SemanticInfo> 
             return Some(info);
         }
     }
+
+    if token.kind() ==    MSyntaxKind::NEW_KW {
+        return Some(SemanticInfo::NewKw());
+    }
     None
 }
 

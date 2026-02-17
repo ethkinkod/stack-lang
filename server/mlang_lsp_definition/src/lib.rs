@@ -165,6 +165,7 @@ pub enum SemanticInfo {
     // where z is reference identifier
     // contains source SemanticInfo
     Reference(BaseInfo),
+    NewKw(),
 }
 
 pub fn get_declaration<'a, I, D>(semantic_info: &SemanticInfo, definitions: I) -> Vec<Location>
@@ -299,7 +300,7 @@ where
 
             locations
         }
-        SemanticInfo::ClassInstance(_) | SemanticInfo::Reference(_) => locations,
+        SemanticInfo::ClassInstance(_) | SemanticInfo::Reference(_) | SemanticInfo::NewKw() => locations,
     }
 }
 
@@ -355,7 +356,8 @@ where
         SemanticInfo::ClassInstance(_)
         | SemanticInfo::Reference(_)
         | SemanticInfo::ClassExtends(_)
-        | SemanticInfo::SuperCall(_, _) => vec![],
+        | SemanticInfo::SuperCall(_, _)
+        | SemanticInfo::NewKw() => vec![],
     }
 }
 
@@ -517,7 +519,7 @@ where
         .collect::<Vec<_>>()
 }
 
-pub fn get_completion<'a, I, D>(semantic_info: &SemanticInfo, definitions: I) -> Vec<CompletionItem>
+pub fn get_dot_completion<'a, I, D>(semantic_info: &SemanticInfo, definitions: I) -> Vec<CompletionItem>
 where
     I: IntoIterator<Item = &'a D>,
     D: CodeSymbolDefinition + MarkupDefinition + LocationDefinition + 'a,
@@ -591,44 +593,6 @@ where
         inherited_methods.iter().map(|e| e.1.1).collect()
     }
 
-    fn get_completion_items_from_definitions<'a, I, D>(definitions: I) -> Vec<CompletionItem>
-    where
-        I: IntoIterator<Item = &'a D>,
-        D: CodeSymbolDefinition + MarkupDefinition + 'a,
-    {
-        let mut def_groups: HashMap<&str, Vec<&D>> = HashMap::new();
-        for d in definitions.into_iter() {
-            def_groups.entry(d.id()).or_default().push(d);
-        }
-
-        def_groups
-            .into_iter()
-            .map(|def_group| {
-                let first_def = def_group.1.first().unwrap();
-                let completion_label = first_def.id();
-                let mut completion_item = CompletionItem::new_simple(
-                    completion_label.to_string(),
-                    first_def.parent().unwrap_or_default().to_string(),
-                );
-                if first_def.is_method() {
-                    completion_item.kind = Some(CompletionItemKind::METHOD);
-                } else if first_def.is_getter() || first_def.is_setter() {
-                    completion_item.kind = Some(CompletionItemKind::PROPERTY);
-                }
-                if completion_label.starts_with("_") {
-                    completion_item.sort_text = Some(format!("я{}", completion_label));
-                }
-                let markdown_strs: Vec<String> = def_group.1.iter().map(|d| d.markdown()).collect();
-                let markdown = MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: markdown_strs.join("\n"),
-                };
-                completion_item.documentation = Some(Documentation::MarkupContent(markdown));
-                completion_item
-            })
-            .collect()
-    }
-
     let base_info = match semantic_info {
         SemanticInfo::Reference(info) => info.as_ref(),
         _ => semantic_info,
@@ -654,4 +618,72 @@ where
         }
         _ => vec![],
     }
+}
+
+pub fn get_spase_completion<'a, I, D>(semantic_info: &SemanticInfo, definitions: I) -> Vec<CompletionItem>
+where
+    I: IntoIterator<Item = &'a D>,
+    D: CodeSymbolDefinition + MarkupDefinition + LocationDefinition + 'a,
+{
+    fn get_classes_definitions<'a, I, D>(definitions: I) -> Vec<&'a D>
+    where
+        I: IntoIterator<Item = &'a D>,
+        D: CodeSymbolDefinition + 'a,
+    {
+        definitions.into_iter().filter(|d| d.is_class()).collect::<Vec<_>>()
+    }
+
+    let base_info = match semantic_info {
+        SemanticInfo::Reference(info) => info.as_ref(),
+        _ => semantic_info,
+    };
+    match base_info {
+        SemanticInfo::NewKw() => {
+            let methods_defs = get_classes_definitions(definitions);
+            let completions: Vec<CompletionItem> =
+                get_completion_items_from_definitions(methods_defs);
+            completions
+        }
+        _ => vec![],
+    }
+}
+
+fn get_completion_items_from_definitions<'a, I, D>(definitions: I) -> Vec<CompletionItem>
+where
+    I: IntoIterator<Item = &'a D>,
+    D: CodeSymbolDefinition + MarkupDefinition + 'a,
+{
+    let mut def_groups: HashMap<&str, Vec<&D>> = HashMap::new();
+    for d in definitions.into_iter() {
+        def_groups.entry(d.id()).or_default().push(d);
+    }
+
+    def_groups
+        .into_iter()
+        .map(|def_group| {
+            let first_def = def_group.1.first().unwrap();
+            let completion_label = first_def.id();
+            let mut completion_item = CompletionItem::new_simple(
+                completion_label.to_string(),
+                first_def.parent().unwrap_or_default().to_string(),
+            );
+            if first_def.is_method() {
+                completion_item.kind = Some(CompletionItemKind::METHOD);
+            } else if first_def.is_getter() || first_def.is_setter() {
+                completion_item.kind = Some(CompletionItemKind::PROPERTY);
+            } else if first_def.is_class() {
+                completion_item.kind = Some(CompletionItemKind::CLASS);
+            }
+            if completion_label.starts_with("_") {
+                completion_item.sort_text = Some(format!("я{}", completion_label));
+            }
+            let markdown_strs: Vec<String> = def_group.1.iter().map(|d| d.markdown()).collect();
+            let markdown = MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: markdown_strs.join("\n"),
+            };
+            completion_item.documentation = Some(Documentation::MarkupContent(markdown));
+            completion_item
+        })
+        .collect()
 }

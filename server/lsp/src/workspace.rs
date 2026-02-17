@@ -11,7 +11,7 @@ use walkdir::WalkDir;
 use mlang_core::{AnyMCoreDefinition, load_core_api};
 use mlang_lsp_definition::{
     CodeSymbolDefinition as _, CodeSymbolInformation as _, LocationDefinition as _, SemanticInfo,
-    StringLowerCase, get_completion, get_declaration, get_hover, get_reference, get_symbols,
+    StringLowerCase, get_dot_completion, get_spase_completion, get_declaration, get_hover, get_reference, get_symbols,
 };
 use mlang_parser::parse;
 use mlang_semantic::{SemanticModel, identifier_for_offset, semantics};
@@ -354,22 +354,34 @@ impl Workspace {
         })
     }
 
-    pub async fn completion(&self, uri: &Url, position: Position) -> Option<CompletionResponse> {
-        // get dot position
-        let dot_position = Position::new(position.line, position.character.checked_sub(2)?);
-        let semantic_info = self.identifier_from_position(uri, dot_position).await?;
-        let semantics = self
-            .mlang_semantics
-            .iter()
-            .filter_map(|r| match r.pair() {
-                (_path, Some(definitions)) => Some(Arc::clone(definitions)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        let definitions = semantics.iter().flat_map(|arc| arc.definitions());
-        let completions: Vec<CompletionItem> = get_completion(&semantic_info, definitions);
-        Some(CompletionResponse::Array(completions))
+    pub async fn completion(&self, uri: &Url, position: Position, trigger_character: Option<String>) -> Option<CompletionResponse> {
+        if let Some(trigger_character) = trigger_character {
+            // get dot position
+            let dot_position = Position::new(position.line, position.character.checked_sub(2)?);
+            let semantic_info = self.identifier_from_position(uri, dot_position).await?;
+            let semantics = self
+                .mlang_semantics
+                .iter()
+                .filter_map(|r| match r.pair() {
+                    (_path, Some(definitions)) => Some(Arc::clone(definitions)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            match trigger_character.as_str() {
+                "." => {
+                    let definitions = semantics.iter().flat_map(|arc| arc.definitions());
+                    let completions: Vec<CompletionItem> = get_dot_completion(&semantic_info, definitions);
+                    return Some(CompletionResponse::Array(completions));
+                }
+                " " => {
+                    let definitions = semantics.iter().flat_map(|arc| arc.definitions().filter(|d| d.is_class()));
+                    let completions: Vec<CompletionItem> = get_spase_completion(&semantic_info, definitions);
+                    return Some(CompletionResponse::Array(completions));
+                }
+                _ => {}
+            }
+        }
+        None
     }
 }
 

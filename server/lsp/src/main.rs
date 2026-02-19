@@ -363,7 +363,15 @@ impl LanguageServer for Backend {
         let context = params.context;
         trace!("completion {} {:?} {:?}", &file_uri, &pos, &context);
 
-        let completion = self.workspace.completion(&file_uri, pos).await;
+        let trigger_character = match context {
+            Some(c) => c.trigger_character,
+            None => None,
+        };
+
+        let completion = self
+            .workspace
+            .completion(&file_uri, pos, trigger_character)
+            .await;
 
         Ok(completion)
     }

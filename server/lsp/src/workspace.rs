@@ -354,10 +354,32 @@ impl Workspace {
         })
     }
 
-    pub async fn completion(&self, uri: &Url, position: Position) -> Option<CompletionResponse> {
+    pub async fn completion(
+        &self,
+        uri: &Url,
+        position: Position,
+        trigger_symbol: Option<String>
+    ) -> Option<CompletionResponse> {
         // get position before trigger
         let position = Position::new(position.line, position.character.checked_sub(2)?);
         let semantic_info = self.identifier_from_position(uri, position).await?;
+
+        // space completions for new and dot completions for others
+        if let Some(trigger_symbol) = trigger_symbol {
+            match semantic_info {
+                SemanticInfo::NewExpression(None) => {
+                    if trigger_symbol.ne(" ") {
+                        return None;
+                    }
+                }
+                _ => {
+                    if trigger_symbol.ne(".") {
+                        return None;
+                    }
+                }
+            }
+        }
+
         let semantics = self
             .mlang_semantics
             .iter()

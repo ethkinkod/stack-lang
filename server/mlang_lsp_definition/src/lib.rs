@@ -1,8 +1,11 @@
 use line_index::LineColRange;
-use std::collections::HashMap;
+use std::{
+    collections::{HashMap, HashSet},
+    env::var,
+};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, Location, MarkedString, MarkupContent,
-    MarkupKind, Position, Range, SymbolInformation, Url,
+    MarkupKind, Position, Range, SymbolInformation, Url, lsif::ItemKind,
 };
 
 pub use tower_lsp::lsp_types::SymbolKind;
@@ -43,6 +46,7 @@ pub trait CodeSymbolDefinition: Sized + PartialEq {
         self.id().to_lowercase().contains(&another.0)
     }
     fn parameters(&self) -> Option<&str>;
+    fn variables(&self) -> Option<Vec<&str>>;
 }
 
 pub trait CodeSymbolInformation: CodeSymbolDefinition {
@@ -605,7 +609,7 @@ where
 
     let methods = definitions
         .into_iter()
-        .filter(|d| d.is_method() || d.is_getter() || d.is_setter())
+        .filter(|d| d.is_method() || d.is_getter() || d.is_setter() || d.is_constructor())
         // find by class name
         .filter(|d| {
             d.container()
@@ -622,7 +626,10 @@ where
             let method_name = format!(
                 "{}{}{}",
                 d.is_getter(),
-                d.id(),
+                match d.is_constructor() {
+                    true => format!("{}{}", d.id(), index),
+                    false => d.id().to_string(),
+                },
                 d.parameters().unwrap_or_default()
             );
             match inherited_methods.get(&method_name) {
@@ -646,11 +653,20 @@ where
     D: CodeSymbolDefinition + MarkupDefinition + 'a,
 {
     let mut def_groups: HashMap<&str, Vec<&D>> = HashMap::new();
+    let mut variables: HashSet<&str> = HashSet::new();
     for d in definitions.into_iter() {
-        def_groups.entry(d.id()).or_default().push(d);
+        if d.is_constructor() {
+            if let Some(variavbles) = d.variables() {
+                for variable in variavbles {
+                    variables.insert(variable);
+                }
+            }
+        } else {
+            def_groups.entry(d.id()).or_default().push(d);
+        }
     }
 
-    def_groups
+    let mut completions = def_groups
         .into_iter()
         .map(|def_group| {
             let first_def = def_group.1.first().unwrap();
@@ -677,5 +693,22 @@ where
             completion_item.documentation = Some(Documentation::MarkupContent(markdown));
             completion_item
         })
-        .collect()
+        .collect::<Vec<CompletionItem>>();
+    completions.append(
+        &mut variables
+            .iter()
+            .map(|v| {
+                let completion_label = v.to_string();
+                let completion_parent = "".to_string();
+                let mut completion_item =
+                    CompletionItem::new_simple(completion_label.clone(), completion_parent);
+                completion_item.kind = Some(CompletionItemKind::VARIABLE);
+                if completion_label.starts_with("_") {
+                    completion_item.sort_text = Some(format!("я{}", completion_label));
+                }
+                completion_item
+            })
+            .collect::<Vec<CompletionItem>>(),
+    );
+    completions
 }

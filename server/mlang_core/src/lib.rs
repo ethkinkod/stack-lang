@@ -58,6 +58,10 @@ impl CodeSymbolDefinition for AnyMCoreDefinition {
     fn parameters(&self) -> Option<&str> {
         None
     }
+
+    fn variables(&self) -> Option<Vec<&str>> {
+        None
+    }
 }
 
 impl MarkupDefinition for AnyMCoreDefinition {

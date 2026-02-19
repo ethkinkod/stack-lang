@@ -9,7 +9,7 @@ use mlang_lsp_definition::{
 };
 use mlang_syntax::{
     AnyMClassMember, AnyMLiteralExpression, AnyMSwitchClause, MClassDeclaration, MFileSource,
-    MFunctionDeclaration, MLanguage, MReport, MReportSection, MSyntaxNode,
+    MFunctionDeclaration, MLanguage, MReport, MReportSection, MSyntaxKind, MSyntaxNode,
 };
 
 use crate::SemanticModel;
@@ -117,6 +117,18 @@ impl CodeSymbolDefinition for AnyMDefinition {
             AnyMDefinition::MClassMemberDefinition(member) => Some(&member.params),
             AnyMDefinition::MFunctionDefinition(funct) => Some(&funct.params),
             AnyMDefinition::MHandlerDefinition(handler) => Some(&handler.params),
+            _ => None,
+        }
+    }
+
+    fn variables(&self) -> Option<Vec<&str>> {
+        match self {
+            AnyMDefinition::MClassMemberDefinition(member) => {
+                if let Some(variables) = &member.variables {
+                    return Some(variables.iter().map(|v| v.as_str()).collect::<Vec<&str>>());
+                }
+                None
+            }
             _ => None,
         }
     }
@@ -257,6 +269,7 @@ pub struct MClassMemberDefinition {
     description: Option<String>,
     range: LineColRange,
     m_type: MClassMethodType,
+    variables: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Copy, Clone)]
@@ -550,6 +563,34 @@ fn class_member_definition(
             AnyMClassMember::MSetterClassMember(_) => MClassMethodType::Setter,
             _ => MClassMethodType::Method,
         },
+        variables: match member {
+            AnyMClassMember::MConstructorClassMember(m) => {
+                let body = m.body();
+                if body.is_err() {
+                    return None;
+                }
+                let body = body.unwrap();
+                let variables_names = body
+                    .statements()
+                    .iter()
+                    .filter_map(|s| s.as_m_expression_statement().cloned())
+                    .filter_map(|s| {
+                        if let Some(ft) = s.into_syntax().first_token()
+                            && let Some(st) = ft.next_token()
+                            && let Some(tt) = st.next_token()
+                            && ft.kind() == MSyntaxKind::THIS_KW
+                            && st.kind() == MSyntaxKind::DOT
+                            && tt.kind() == MSyntaxKind::IDENT
+                        {
+                            return Some(tt.text_trimmed().to_string());
+                        }
+                        None
+                    })
+                    .collect::<Vec<String>>();
+                Some(variables_names)
+            }
+            _ => None,
+        },
     })
 }
 
@@ -766,7 +807,8 @@ mod tests {
                 params: String::from("()"),
                 description: None,
                 range: line_col_range(15, 8, 15, 24),
-                m_type: MClassMethodType::Constructor
+                m_type: MClassMethodType::Constructor,
+                variables: None,
             }),
         );
 
@@ -782,7 +824,8 @@ mod tests {
                 params: String::from("()"),
                 description: Some(String::from("\n# getter description")),
                 range: line_col_range(18, 8, 20, 9),
-                m_type: MClassMethodType::Getter
+                m_type: MClassMethodType::Getter,
+                variables: None
             }),
         );
 
@@ -798,7 +841,8 @@ mod tests {
                 params: String::from("()"),
                 description: None,
                 range: line_col_range(21, 8, 23, 9),
-                m_type: MClassMethodType::Method
+                m_type: MClassMethodType::Method,
+                variables: None
             })
         );
     }
